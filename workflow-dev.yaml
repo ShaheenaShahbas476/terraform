@@ -1,0 +1,68 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    env:
+      ACR_NAME: "xxxxxxx"
+      ACR_LOGIN_SERVER: "xxxxx.azurecr.io"
+      IMAGE_NAME: "xxxxxxx"
+      IMAGE_TAG: "v${{ github.run_number }}"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Azure CLI
+        run: |
+          if ! command -v az &> /dev/null; then
+            curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          fi
+      - name: Azure login
+        run: |
+          az login --identity
+      - name: ACR login
+        run: |
+          az acr login --name $ACR_NAME
+      - name: Build image
+        run: |
+          docker build -t $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG .
+
+      - name: Push image
+        run: |
+          docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG
+
+      - name: Docker Cleanup
+        run: |
+          docker image prune -af
+
+      - name: Deploy to Dev VM
+        env:
+          DOCKER_IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          DOCKER_IMAGE_NAME: ${{ env.IMAGE_NAME }}
+        run: |
+
+          ssh -o StrictHostKeyChecking=no -i ~/xxx/xxxxxxx.pem dxxxxx@x.x.x.x << EOF
+            if ! command -v az &> /dev/null; then
+              curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+            fi
+
+            az login --identity 
+            az acr login --name xxxxxxxxx
+            
+            docker stop xxxxx || true
+            docker rm xxxxxx || true
+            docker image prune -af
+            docker pull xxxxxx.azurecr.io/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}
+
+            docker run -d \
+              --env-file ~/.env \
+              --name  xxxxxx \
+              -p  3000:3000\
+              xxxxxx.azurecr.io/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}
+            
+          EOF

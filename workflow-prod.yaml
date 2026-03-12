@@ -1,0 +1,67 @@
+name: Build and Deploy to VMSS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+
+    env:
+      ACR_NAME: "xxxxxx"
+      ACR_LOGIN_SERVER: "xxxxxx.azurecr.io"
+      IMAGE_NAME: xxxxxx
+      IMAGE_TAG: "v${{ github.run_number }}"
+      RESOURCE_GROUP: "xxxx"
+      VMSS_NAME: "xxxxxx"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        run: |
+          az login --identity
+
+      - name: ACR Login
+        run: |
+          az acr login --name $ACR_NAME
+
+      - name: Build Docker Image
+        run: |
+          docker build \
+            -t $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG \
+            -t $ACR_LOGIN_SERVER/$IMAGE_NAME:latest .
+
+      - name: Push Docker Image
+        run: |
+          docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG
+          docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:latest
+
+      - name: Trigger VMSS Rolling Upgrade
+        run: |
+          az vmss rolling-upgrade start \
+            --resource-group $RESOURCE_GROUP \
+            --name $VMSS_NAME
+
+      - name: Cleanup untagged images in ACR
+        run: |
+          echo "Finding untagged images in ACR..."
+          az acr repository show-manifests \
+            --name $ACR_NAME \
+            --repository $IMAGE_NAME \
+            --query "[?tags==null].digest" \
+            -o tsv | while read digest; do
+              echo "Deleting untagged manifest: $digest"
+              az acr repository delete \
+                --name $ACR_NAME \
+                --repository $IMAGE_NAME \
+                --manifest $digest \
+                --yes
+          done
+
+      - name: Docker Cleanup
+        run: |
+          docker image prune -af
